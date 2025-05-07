@@ -21,6 +21,9 @@ import android.content.res.AssetManager;
 import android.media.AudioManager;
 import android.util.Log;
 import android.view.KeyEvent;
+import android.Manifest;
+import android.content.pm.PackageManager;
+import androidx.core.content.ContextCompat;
 
 import org.apache.cordova.CallbackContext;
 import org.apache.cordova.CordovaPlugin;
@@ -200,15 +203,24 @@ public class NativeAudio extends CordovaPlugin implements AudioManager.OnAudioFo
 		}
 		return new PluginResult(Status.OK);
 	}
+
+	private boolean hasAudioSettingsPermission() {
+		return ContextCompat.checkSelfPermission(cordova.getActivity(), 
+			Manifest.permission.MODIFY_AUDIO_SETTINGS) == PackageManager.PERMISSION_GRANTED;
+	}
+
+	private boolean hasStoragePermission() {
+		return ContextCompat.checkSelfPermission(cordova.getActivity(),
+			Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED;
+	}
+
 	@Override
 	protected void pluginInitialize() {
 		AudioManager am = (AudioManager)cordova.getActivity().getSystemService(Context.AUDIO_SERVICE);
 
-	        int result = am.requestAudioFocus(this,
-	                // Use the music stream.
-	                AudioManager.STREAM_MUSIC,
-	                // Request permanent focus.
-	                AudioManager.AUDIOFOCUS_GAIN);
+		int result = am.requestAudioFocus(this,
+				AudioManager.STREAM_MUSIC,
+				AudioManager.AUDIOFOCUS_GAIN);
 
 		// Allow android to receive the volume events
 		this.webView.setButtonPlumbedToJs(KeyEvent.KEYCODE_VOLUME_DOWN, false);
@@ -219,6 +231,12 @@ public class NativeAudio extends CordovaPlugin implements AudioManager.OnAudioFo
 	public boolean execute(final String action, final JSONArray data, final CallbackContext callbackContext) {
 		Log.d(LOGTAG, "Plugin Called: " + action);
 		
+		if (!hasStoragePermission()) {
+			callbackContext.sendPluginResult(new PluginResult(Status.ERROR, 
+				"WRITE_EXTERNAL_STORAGE permission not granted"));
+			return true;
+		}
+
 		PluginResult result = null;
 		initSoundPool();
 		
@@ -274,11 +292,16 @@ public class NativeAudio extends CordovaPlugin implements AudioManager.OnAudioFo
                     callbackContext.sendPluginResult(new PluginResult(Status.ERROR, e.toString()));
 		}
 	    } else if (SET_VOLUME_FOR_COMPLEX_ASSET.equals(action)) {
-				cordova.getThreadPool().execute(new Runnable() {
-			public void run() {
-	                        callbackContext.sendPluginResult( executeSetVolumeForComplexAsset(data) );
-                    }
-                 });
+			if (!hasAudioSettingsPermission()) {
+				callbackContext.sendPluginResult(new PluginResult(Status.ERROR, 
+					"MODIFY_AUDIO_SETTINGS permission not granted"));
+				return true;
+			}
+			cordova.getThreadPool().execute(new Runnable() {
+				public void run() {
+					callbackContext.sendPluginResult( executeSetVolumeForComplexAsset(data) );
+				}
+			});
 	    }
             else {
                 result = new PluginResult(Status.OK);
@@ -292,6 +315,10 @@ public class NativeAudio extends CordovaPlugin implements AudioManager.OnAudioFo
 	}
 
 	private void initSoundPool() {
+		if (!hasStoragePermission()) {
+			Log.e(LOGTAG, "WRITE_EXTERNAL_STORAGE permission not granted - cannot initialize audio");
+			return;
+		}
 
 		if (assetMap == null) {
 			assetMap = new HashMap<String, NativeAudioAsset>();
